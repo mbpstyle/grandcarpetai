@@ -15,31 +15,50 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
     
-    /* Font: Inter for text, but exclude Streamlit icon elements */
-    h1, h2, h3, h4, h5, h6, p, span, label, div, input, button, a, li, td, th, textarea, select { 
+    /* Font: Inter ONLaY for text elements — NOT spans/buttons (breaks Streamlit icons) */
+    h1, h2, h3, h4, h5, h6, p, label, div, input, a, li, td, th, textarea, select { 
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important; 
     }
-    
-    /* Sidebar collapse button: hide broken icon text, show clean symbol */
-    [data-testid="stSidebarCollapseButton"] button span {
-        font-size: 0 !important;
-        line-height: 0 !important;
+    /* Buttons: apply Inter only to text, not icon spans */
+    .stButton button, .stDownloadButton button, .stNumberInput button { 
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important; 
     }
-    [data-testid="stSidebarCollapseButton"] button::after {
+    .stMarkdown span, .stRadio span, .stCheckbox span {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    }
+    
+    /* Sidebar collapse: hide material icon text completely */
+    [data-testid="stSidebarCollapseButton"] button {
+        font-size: 0 !important;
+        overflow: hidden !important;
+        width: 36px !important;
+        height: 36px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        border-radius: 10px !important;
+        background: rgba(0,0,0,0.04) !important;
+        border: none !important;
+    }
+    [data-testid="stSidebarCollapseButton"] button span {
+        visibility: hidden !important;
+        width: 0 !important;
+        height: 0 !important;
+        overflow: hidden !important;
+        position: absolute !important;
+    }
+    [data-testid="stSidebarCollapseButton"] button::before {
         content: "☰";
-        font-size: 20px;
-        font-family: system-ui !important;
+        visibility: visible !important;
+        font-size: 18px;
+        font-family: system-ui, sans-serif !important;
         color: #48484A;
     }
     
-    /* Fix upload button text doubling */
-    [data-testid="stFileUploader"] button {
-        font-size: 0.85rem !important;
-        overflow: hidden !important;
-    }
-    [data-testid="stFileUploader"] section > button > div {
-        display: flex !important;
-        align-items: center !important;
+    /* File uploader: fix doubled text */
+    [data-testid="stFileUploader"] button span[data-testid="stMarkdownContainer"],
+    [data-testid="stFileUploader"] button > div > span:first-child {
+        font-family: 'Inter', sans-serif !important;
     }
     
     .stApp { background: #F2F2F7 !important; }
@@ -221,7 +240,7 @@ st.markdown("---")
 
 # ----------------- 1. AŞAMA: RENK İNDİRGEME -----------------
 if stage == "1. Aşama: Renk İndirgeme":
-    st.title("✂️ Renk İndirgeme")
+    st.title("🎨 Renk İndirgeme")
     st.markdown("Halıdaki ışık, gölge ve kumaş dokusunu temizleyerek tasarımı **hedeflenen renk sayısında** net bir dijital çizime dönüştürür.")
     
     uploaded_file = st.file_uploader("Tamamlanmış Fotoğrafı Yükleyin", type=["bmp", "png", "jpg", "jpeg"])
@@ -390,7 +409,7 @@ if stage == "1. Aşama: Renk İndirgeme":
 
 # ----------------- 2. AŞAMA: PİKSELLEŞTİRME -----------------
 elif stage == "2. Aşama: Pikselleştirme":
-    st.title("🧩 Pikselleştirme")
+    st.title("🔲 Pikselleştirme")
     st.markdown("Renk indirgemeden geçmiş görseli, **tarak ve atkı parametreleriyle** makine ızgarasına dönüştürür.")
     
     uploaded_file = st.file_uploader("Renk İndirgenmiş Görseli Yükleyin", type=["bmp", "png", "jpg", "jpeg"], key="pixel_upload")
