@@ -14,10 +14,33 @@ st.set_page_config(page_title="Grand Carpet AI", layout="wide", page_icon="🧶"
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded');
-    *:not([class*="material"]):not([data-testid="stSidebarCollapseButton"] *), *::before, *::after { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important; }
-    [data-testid="stSidebarCollapseButton"] button span { font-family: 'Material Symbols Rounded' !important; font-size: 0 !important; }
-    [data-testid="stSidebarCollapseButton"] button span::before { content: "≡"; font-family: 'Inter', sans-serif !important; font-size: 24px !important; }
+    
+    /* Font: Inter for text, but exclude Streamlit icon elements */
+    h1, h2, h3, h4, h5, h6, p, span, label, div, input, button, a, li, td, th, textarea, select { 
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important; 
+    }
+    
+    /* Sidebar collapse button: hide broken icon text, show clean symbol */
+    [data-testid="stSidebarCollapseButton"] button span {
+        font-size: 0 !important;
+        line-height: 0 !important;
+    }
+    [data-testid="stSidebarCollapseButton"] button::after {
+        content: "☰";
+        font-size: 20px;
+        font-family: system-ui !important;
+        color: #48484A;
+    }
+    
+    /* Fix upload button text doubling */
+    [data-testid="stFileUploader"] button {
+        font-size: 0.85rem !important;
+        overflow: hidden !important;
+    }
+    [data-testid="stFileUploader"] section > button > div {
+        display: flex !important;
+        align-items: center !important;
+    }
     
     .stApp { background: #F2F2F7 !important; }
     
