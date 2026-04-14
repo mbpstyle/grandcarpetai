@@ -4,7 +4,7 @@ import numpy as np
 import io
 from scipy.spatial import KDTree
 from sklearn.cluster import MiniBatchKMeans
-from scipy.signal import find_peaks
+from collections import Counter
 
 st.set_page_config(page_title="Grand Carpet AI", layout="wide", page_icon="🧶")
 
@@ -242,165 +242,92 @@ st.markdown("---")
 if stage == "1. Aşama: Renk İndirgeme":
     st.title("🎨 Renk İndirgeme")
     st.markdown("Halıdaki ışık, gölge ve kumaş dokusunu temizleyerek tasarımı **hedeflenen renk sayısında** net bir dijital çizime dönüştürür.")
-    
+
     uploaded_file = st.file_uploader("Tamamlanmış Fotoğrafı Yükleyin", type=["bmp", "png", "jpg", "jpeg"])
-    
+
     if uploaded_file is not None:
         file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
         img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        
+
         col1, col2 = st.columns(2)
         with col1:
             st.image(img_rgb, caption="Orijinal Fotoğraf", use_container_width=True)
-        
+
         with col2:
             target_colors = st.number_input("Hedef Renk Sayısı (Örn: 8)", min_value=2, max_value=256, value=8)
 
-            smoothing_method = st.radio(
-                "Halı Türü ve Tasarım Felsefesi (En Önemli Karar):", 
-                (
-                    "🏭 Texcelle Endüstriyel (Jakar Örgü ve İlmek Snap)", 
-                    "🔺 Düz & Geometrik Halılar (Vektör Etkisi - MeanShift)",
-                    "🌪 Kumlu & Kıvrımlı Soyut Halılar (Orijinal Doku - Saf KMeans)"
-                )
-            )
-            
-            knot_width = st.number_input("Halı/Desen Yatay İlmek (Knot Grid) Sayısı", min_value=10, max_value=2000, value=200)
-            
-            # Soyut desenli halılarda ışık eşitleme kasıtlı gradyanları yok eder, varsayılan KAPALI
-            if smoothing_method == "🌪 Kumlu & Kıvrımlı Soyut Halılar (Orijinal Doku - Saf KMeans)":
-                fix_lighting = st.checkbox("💡 Işık Eşitlemesi (Soyut halılarda KAPALI önerilir)", value=False)
-            else:
-                fix_lighting = st.checkbox("💡 Işık Eşitlemesi (Zorunlu)", value=True)
-            
+            fix_lighting = st.checkbox("💡 Işık Eşitlemesi (Fotoğraftaki gölge/ışık farkını dengeler)", value=True)
+
             if st.button("Hizala ve İşle", type="primary"):
-                with st.spinner("Endüstriyel hesaplamalar yapılıyor..."):
-                    
+                with st.spinner("Renk indirgeme yapılıyor..."):
+
+                    # Opsiyonel ışık eşitleme (LAB L kanalı üzerinden)
                     if fix_lighting:
                         lab_img = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
                         l, a, b = cv2.split(lab_img)
                         illumination = cv2.GaussianBlur(l, (101, 101), 0)
                         l_corrected = np.clip(l.astype(np.float32) - illumination.astype(np.float32) + np.mean(l), 0, 255).astype(np.uint8)
                         img = cv2.cvtColor(cv2.merge((l_corrected, a, b)), cv2.COLOR_LAB2BGR)
-                    
-                    if smoothing_method == "🏭 Texcelle Endüstriyel (Jakar Örgü ve İlmek Snap)":
-                        # 1. Ortogonal Knot (İlmek) Dağılımına Zorla (Superpixels Downsampling)
-                        h_orig, w_orig = img.shape[:2]
-                        knot_h = int(knot_width * (h_orig / w_orig))
-                        
-                        # Resmi ilmeklere bölüyoruz (Orthogonal Snapping)
-                        knot_img = cv2.resize(img, (knot_width, knot_h), interpolation=cv2.INTER_AREA)
-                        
-                        # 2. Renk Sayısını (KMeans) İlmek bazında yakala
-                        lab = cv2.cvtColor(knot_img, cv2.COLOR_BGR2LAB)
-                        pixels = lab.reshape(-1, 3)
-                        
-                        kmeans = MiniBatchKMeans(n_clusters=target_colors, max_iter=50, batch_size=3072, random_state=42, n_init="auto")
-                        kmeans.fit(pixels)
-                        
-                        # 3. Gerçek Renkli Bayer Ordered Dithering (Jakar Formülü)
-                        bayer = np.array([
-                            [ 0,  8,  2, 10],
-                            [12,  4, 14,  6],
-                            [ 3, 11,  1,  9],
-                            [15,  7, 13,  5]
-                        ]) / 16.0
-                        bayer = bayer - 0.5 # -0.5 ile +0.5 arasına çek
-                        
-                        bayer_tiled = np.tile(bayer, (knot_h // 4 + 1, knot_width // 4 + 1))[:knot_h, :knot_width]
-                        
-                        # Renklerin daha iyi karışması için L (Aydınlık) kanalına mikro zikzaklar (dither) ekliyoruz
-                        spread = 45.0 # Örgü Şiddeti
-                        lab_img_float = lab.astype(np.float32)
-                        lab_img_float[:, :, 0] += bayer_tiled * spread 
-                        lab_img_float = np.clip(lab_img_float, 0, 255)
-                        
-                        # Zikzak eklenmiş pikselleri Paletteki EN YAKIN (Nearest) Orijinal Renklere Zorla 
-                        dithered_pixels = lab_img_float.reshape(-1, 3)
-                        tree = KDTree(kmeans.cluster_centers_)
-                        _, indices = tree.query(dithered_pixels)
-                        
-                        final_pixels = kmeans.cluster_centers_[indices]
-                        final_pixels = np.clip(final_pixels.astype("uint8"), 0, 255)
-                        
-                        reduced_lab = final_pixels.reshape((knot_h, knot_width, 3))
-                        final_bgr = cv2.cvtColor(reduced_lab, cv2.COLOR_LAB2BGR)
-                        
-                        # 4. Nearest Neighbor ile Orijinal HD boyuta Upscale (Jilet Keskinliği - Kavis ezilmeden)
-                        final_scaled = cv2.resize(final_bgr, (w_orig, h_orig), interpolation=cv2.INTER_NEAREST)
-                        final_rgb = cv2.cvtColor(final_scaled, cv2.COLOR_BGR2RGB)
-                        
-                        st.session_state['cr_rgb'] = final_rgb
-                        st.session_state['cr_bgr'] = final_scaled
-                        st.session_state['cr_caption'] = f"Sonuç: Tam {target_colors} Renk Jakar Dithering"
-                        
-                    elif smoothing_method == "🔺 Düz & Geometrik Halılar (Vektör Etkisi - MeanShift)":
-                        # KLASİK MEANSHIFT (Geometrik/Modern halılar için muazzam)
-                        flat_img = cv2.pyrMeanShiftFiltering(img, sp=12, sr=35)
-                        flat_img = cv2.bilateralFilter(flat_img, 9, 75, 75)
-                    
-                        lab = cv2.cvtColor(flat_img, cv2.COLOR_BGR2LAB)
-                        pixels = lab.reshape(-1, 3)
-                        
-                        kmeans = MiniBatchKMeans(n_clusters=target_colors, max_iter=50, batch_size=3072, random_state=42, n_init="auto")
-                        kmeans.fit(pixels)
-                        
-                        new_pixels = kmeans.cluster_centers_[kmeans.labels_]
-                        new_pixels = np.clip(new_pixels.astype("uint8"), 0, 255)
-                        
-                        reduced_lab = new_pixels.reshape(lab.shape)
-                        final_img = cv2.cvtColor(reduced_lab, cv2.COLOR_LAB2BGR)
-                        
-                        final_rgb = cv2.cvtColor(final_img, cv2.COLOR_BGR2RGB)
-                        st.session_state['cr_rgb'] = final_rgb
-                        st.session_state['cr_bgr'] = final_img
-                        st.session_state['cr_caption'] = f"Sonuç: Vektörel Sınırlarıyla Tam {target_colors} Renk Geometrik Format"
 
-                    elif smoothing_method == "🌪 Kumlu & Kıvrımlı Soyut Halılar (Orijinal Doku - Saf KMeans)":
-                        # SAF KMEANS (Sulu boya çamuru olmadan orijinal kıvrımları ve grenleri noktalarla koruyan model)
-                        # Sadece çok ufak bir kamera kumlaması bluru atılır
-                        flat_img = cv2.GaussianBlur(img, (3, 3), 0)
-                        
-                        lab = cv2.cvtColor(flat_img, cv2.COLOR_BGR2LAB)
-                        pixels = lab.reshape(-1, 3)
-                        
-                        kmeans = MiniBatchKMeans(n_clusters=target_colors, max_iter=50, batch_size=3072, random_state=42, n_init="auto")
-                        kmeans.fit(pixels)
-                        
-                        new_pixels = kmeans.cluster_centers_[kmeans.labels_]
-                        new_pixels = np.clip(new_pixels.astype("uint8"), 0, 255)
-                        
-                        reduced_lab = new_pixels.reshape(lab.shape)
-                        final_img = cv2.cvtColor(reduced_lab, cv2.COLOR_LAB2BGR)
-                        
-                        final_rgb = cv2.cvtColor(final_img, cv2.COLOR_BGR2RGB)
-                        st.session_state['cr_rgb'] = final_rgb
-                        st.session_state['cr_bgr'] = final_img
-                        st.session_state['cr_caption'] = f"Sonuç: Kıvrımları Koruyan Tam {target_colors} Renk Saf Doku"
-                    
-                    # Palette'i session_state'e kaydet
+                    # Hafif gürültü temizleme (kamera kumlaması)
+                    img_clean = cv2.GaussianBlur(img, (3, 3), 0)
+
+                    # LAB renk uzayında K-Means (tam çözünürlükte, ön küçültme yok)
+                    lab = cv2.cvtColor(img_clean, cv2.COLOR_BGR2LAB)
+                    pixels = lab.reshape(-1, 3).astype(np.float32)
+
+                    kmeans = MiniBatchKMeans(
+                        n_clusters=target_colors, max_iter=50,
+                        batch_size=3072, random_state=42, n_init="auto"
+                    )
+                    kmeans.fit(pixels)
+
+                    # Her pikseli en yakın palet rengine eşle (nearest neighbor — renk karışımı yok)
+                    new_pixels = kmeans.cluster_centers_[kmeans.labels_]
+                    new_pixels = np.clip(new_pixels.astype("uint8"), 0, 255)
+
+                    reduced_lab = new_pixels.reshape(lab.shape)
+                    final_img = cv2.cvtColor(reduced_lab, cv2.COLOR_LAB2BGR)
+                    final_rgb = cv2.cvtColor(final_img, cv2.COLOR_BGR2RGB)
+
+                    st.session_state['cr_rgb'] = final_rgb
+                    st.session_state['cr_bgr'] = final_img
+                    st.session_state['cr_caption'] = f"Sonuç: {target_colors} Renk İndirgeme"
                     st.session_state['cr_palette'] = kmeans.cluster_centers_
-        
+                    st.session_state['cr_labels'] = kmeans.labels_
+                    st.session_state['cr_total_pixels'] = len(kmeans.labels_)
+
         # === SONUÇLARI GÖSTER (session_state — buton bloğu dışında, indirme çalışır) ===
         if 'cr_rgb' in st.session_state:
             st.divider()
             st.image(st.session_state['cr_rgb'], caption=st.session_state.get('cr_caption', 'Sonuç'), use_container_width=True)
-            
-            # === RENK PALETİNİ EKRANDA GÖSTER ===
+
+            # === RENK PALETİNİ EKRANDA GÖSTER (sıklık bilgisiyle) ===
             if 'cr_palette' in st.session_state:
                 st.markdown("### 🎨 Tasarıma Çıkarılan Renk Paleti")
                 pal_lab = st.session_state['cr_palette'].reshape(1, -1, 3).astype(np.uint8)
                 pal_rgb = cv2.cvtColor(pal_lab, cv2.COLOR_LAB2RGB)[0]
-                
+
+                # Sıklık hesapla
+                label_counts = Counter(st.session_state['cr_labels'])
+                total_px = st.session_state['cr_total_pixels']
+
+                # Sıklığa göre sırala (en yaygın renk solda)
+                sorted_indices = sorted(label_counts.keys(), key=lambda k: label_counts[k], reverse=True)
+
                 cols = st.columns(len(pal_rgb))
-                for idx, color in enumerate(pal_rgb):
+                for col_idx, pal_idx in enumerate(sorted_indices):
+                    color = pal_rgb[pal_idx]
                     hex_color = '#%02x%02x%02x' % (color[0], color[1], color[2])
-                    with cols[idx]:
+                    count = label_counts[pal_idx]
+                    pct = (count / total_px) * 100
+                    with cols[col_idx]:
                         st.markdown(f'<div style="background-color: {hex_color}; width: 100%; height: 40px; border-radius: 6px; border: 1px solid #777;"></div>', unsafe_allow_html=True)
                         st.caption(f"{hex_color}")
-            
-            # === BMP İNDİRME BUTONU (artık buton bloğu dışında — çalışır!) ===
+                        st.caption(f"%{pct:.1f}")
+
+            # === BMP İNDİRME BUTONU ===
             dl_img = st.session_state['cr_bgr']
             is_success, buffer = cv2.imencode(".bmp", dl_img)
             if is_success:
@@ -776,4 +703,3 @@ elif stage == "2. Aşama: Pikselleştirme":
                         st.caption("Fiziksel oranlarıyla render edilmiş görsel")
                 
                 st.success(f"✅ {sv_tarak}T/{sv_atki}A makine — {sv_en}×{sv_boy}cm halı → {pw}×{ph} = {pw*ph:,} ilmek hazır!")
-
