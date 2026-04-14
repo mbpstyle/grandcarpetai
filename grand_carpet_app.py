@@ -484,55 +484,69 @@ elif stage == "2. Aşama: Pikselleştirme":
                     # ═══════════════════════════════════════════
                     # FAZ 1: MEVCUT PALETTE İLE SEGMENTASYON
                     # ═══════════════════════════════════════════
-                    
+
                     # ADIM 1: Görseldeki mevcut renk paletini al (KMeans YOK)
                     lab_full = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
                     all_pixels = lab_full.reshape(-1, 3).astype(np.float64)
-                    
+
                     # Mevcut benzersiz renkleri LAB uzayında çıkar
                     unique_lab = np.unique(lab_full.reshape(-1, 3), axis=0).astype(np.float64)
                     palette_lab = unique_lab
                     num_colors = len(palette_lab)
-                    
-                    # ADIM 2: Her pikseli etiketle + blok-mod küçült
+
+                    # ADIM 2: Her pikseli etiketle
                     tree = KDTree(palette_lab)
                     _, pixel_labels = tree.query(all_pixels)
                     label_map = pixel_labels.reshape(org_h, org_w)
-                    
+
+                    # ADIM 3: Kenar tespiti — kontur pikselleri oy ağırlığı 3x alır
+                    # Bu sayede 1px ince çizgiler blok oylamasında kaybolmaz
+                    gray_for_edge = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    edges = cv2.Canny(gray_for_edge, 30, 90)
+                    # Kenarları 1 piksel genişlet (daha güvenli koruma bandı)
+                    edges_dilated = cv2.dilate(edges, np.ones((2, 2), np.uint8), iterations=1)
+                    edge_weight_flat = np.where(edges_dilated.ravel() > 0, 3, 1).astype(np.float64)
+
+                    # ADIM 4: Ağırlıklı blok majority vote
+                    # Her çıktı pikseli = kaynak bloğundaki ağırlıklı oy kazananı
+                    # Kenar pikselleri 3x oy → ince çizgiler/konturlar hayatta kalır
                     grid_j = np.clip(np.arange(org_h) * pixel_h // org_h, 0, pixel_h - 1)
                     grid_i = np.clip(np.arange(org_w) * pixel_w // org_w, 0, pixel_w - 1)
                     grid_jj, grid_ii = np.meshgrid(grid_j, grid_i, indexing='ij')
                     knot_flat = (grid_jj * pixel_w + grid_ii).ravel().astype(np.int64)
                     color_flat = label_map.ravel().astype(np.int64)
-                    
+
                     n_knots = pixel_h * pixel_w
-                    combined = knot_flat * num_colors + color_flat
-                    hist = np.bincount(combined, minlength=n_knots * num_colors)
-                    count_matrix = hist[:n_knots * num_colors].reshape(n_knots, num_colors)
-                    
+                    combined = (knot_flat * num_colors + color_flat).astype(np.int64)
+                    # Ağırlıklı bincount ile kazanan rengi bul
+                    hist = np.bincount(combined, weights=edge_weight_flat, minlength=n_knots * num_colors)
+                    count_matrix = hist.reshape(n_knots, num_colors)
+
                     small_labels = count_matrix.argmax(axis=1).reshape(pixel_h, pixel_w)
-                    
-                    # ADIM 3: Agresif sınır temizleme (3 geçiş)
-                    # Her geçişte <2 aynı renkli komşusu olan pikseller
-                    # dominant komşuyla değiştirilir → pütür/kırıntı/tırtık giderilir
-                    for _ in range(3):
+
+                    # ADIM 5: Minimal temizleme — SADECE tamamen izole pikseleler (2 geçiş)
+                    # Değişiklik: same < 2  →  same == 0
+                    # Eski hali diagonal köşe piksellerini de alıyordu (1 komşu yeterliydi)
+                    # Yeni hali sadece hiç komşusu olmayan "yalnız" pikselleri temizler
+                    for _ in range(2):
                         up    = np.roll(small_labels, 1, axis=0)
                         down  = np.roll(small_labels, -1, axis=0)
                         left  = np.roll(small_labels, 1, axis=1)
                         right = np.roll(small_labels, -1, axis=1)
-                        
+
                         same = ((small_labels == up).astype(np.int32) +
                                 (small_labels == down).astype(np.int32) +
                                 (small_labels == left).astype(np.int32) +
                                 (small_labels == right).astype(np.int32))
-                        
-                        weak = same < 2
+
+                        # Sadece 4 komşusunun da farklı renk olduğu "atom" pikselleri kaldır
+                        weak = same == 0
                         weak[0, :] = False; weak[-1, :] = False
                         weak[:, 0] = False; weak[:, -1] = False
-                        
+
                         if not np.any(weak):
                             break
-                        
+
                         nbr = np.zeros((pixel_h, pixel_w, num_colors), dtype=np.int32)
                         for nb in [up, down, left, right]:
                             for c in range(num_colors):
