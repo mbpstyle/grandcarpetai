@@ -248,9 +248,13 @@ if stage == "1. Aşama: Renk İndirgeme":
         img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
+        # Orijinal renk sayısını tespit et
+        unique_orig = len(np.unique(img_rgb.reshape(-1, 3), axis=0))
+
         col1, col2 = st.columns(2)
         with col1:
             st.image(img_rgb, caption="Orijinal Fotoğraf", use_container_width=True)
+            st.info(f"🎨 Orijinal görselde **{unique_orig:,}** benzersiz renk tespit edildi.")
 
         with col2:
             target_colors = st.number_input("Hedef Renk Sayısı (Örn: 8)", min_value=2, max_value=256, value=8)
@@ -392,9 +396,13 @@ elif stage == "2. Aşama: Pikselleştirme":
         org_h, org_w = img.shape[:2]
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
+        # Yüklenen görseldeki renk sayısını tespit et
+        unique_pix = len(np.unique(img.reshape(-1, 3), axis=0))
+
         col1, col2 = st.columns(2)
         with col1:
             st.image(img_rgb, caption=f"Yüklenen ({org_w}×{org_h})", use_container_width=True)
+            st.info(f"🎨 Görselde **{unique_pix:,}** benzersiz renk tespit edildi.")
 
         with col2:
             st.markdown("### 🏭 Makine Parametreleri")
@@ -413,19 +421,38 @@ elif stage == "2. Aşama: Pikselleştirme":
             with ecol2:
                 hali_boy = st.number_input("Halı Boyu (cm)", min_value=10, max_value=2000, value=230, key="hali_boy")
 
-            pixel_w = int(tarak * hali_en * 0.1)
-            pixel_h = int(atki * hali_boy * 0.1)
-            ilmek_w_mm = 10.0 / tarak * 10
-            ilmek_h_mm = 10.0 / atki * 10
+            # Hesaplama: tarak ve atkı 10cm'deki diş/ilmek sayısı
+            # En pikseli = (tarak / 10) × halı_eni_cm = tarak × halı_eni / 10
+            # Boy pikseli = (atkı / 10) × halı_boyu_cm = atkı × halı_boyu / 10
+            tarak_per_cm = tarak / 10.0
+            atki_per_cm = atki / 10.0
+            pixel_w = round(tarak_per_cm * hali_en)
+            pixel_h = round(atki_per_cm * hali_boy)
+
+            # 1 ilmeğin fiziksel boyutu
+            ilmek_w_mm = 10.0 / tarak   # cm → mm için ×10 gerek yok, 10cm/tarak = cm, ama mm istiyoruz
+            ilmek_w_mm = 100.0 / tarak  # 100mm / tarak = mm cinsinden 1 ilmek genişliği
+            ilmek_h_mm = 100.0 / atki   # 100mm / atkı = mm cinsinden 1 ilmek yüksekliği
+
             toplam_ilmek = pixel_w * pixel_h
+
+            # Metrekareye düşen ilmek: (tarak_per_m) × (atkı_per_m)
+            tarak_per_m = tarak * 10   # 10cm'de tarak → 100cm'de tarak×10
+            atki_per_m = atki * 10
+            ilmek_per_m2 = tarak_per_m * atki_per_m
+
+            # Halı alanı
+            hali_alan_m2 = (hali_en / 100.0) * (hali_boy / 100.0)
 
             st.divider()
             st.markdown("### 📊 Hesaplanan Değerler")
             st.success(f"""
-            **Piksel Boyutu:** {pixel_w} × {pixel_h} piksel
-            **Formül:** {tarak}×{hali_en}×0.1 = **{pixel_w}** en  /  {atki}×{hali_boy}×0.1 = **{pixel_h}** boy
-            **İlmek Fiziksel Boyut:** {ilmek_w_mm:.2f}mm × {ilmek_h_mm:.2f}mm
-            **Toplam İlmek:** {toplam_ilmek:,}
+**Piksel Boyutu:** {pixel_w} × {pixel_h} piksel
+**Formül:** {tarak_per_cm:.1f} ilmek/cm × {hali_en} cm = **{pixel_w}** en  /  {atki_per_cm:.1f} ilmek/cm × {hali_boy} cm = **{pixel_h}** boy
+**1 İlmek Boyutu:** {ilmek_w_mm:.2f}mm × {ilmek_h_mm:.2f}mm
+**Metrekare Yoğunluk:** {ilmek_per_m2:,} ilmek/m²
+**Halı Alanı:** {hali_alan_m2:.2f} m²
+**Toplam İlmek:** {toplam_ilmek:,}
             """)
 
         if st.button("🧩 Pikselleştir", type="primary", key="btn_pixel"):
