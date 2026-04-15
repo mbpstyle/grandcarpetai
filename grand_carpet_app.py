@@ -464,6 +464,7 @@ elif stage == "2. Aşama: Pikselleştirme":
                 out = img[np.ix_(src_rows, src_cols)]
 
                 st.session_state['pxl_result'] = out
+                st.session_state['pxl_source_img'] = img.copy()   # karşılaştırma için
                 st.session_state['pxl_w'] = pixel_w
                 st.session_state['pxl_h'] = pixel_h
                 st.session_state['pxl_org_w'] = org_w
@@ -471,6 +472,7 @@ elif stage == "2. Aşama: Pikselleştirme":
                 st.session_state['pxl_atki'] = atki
                 st.session_state['pxl_hali_en'] = hali_en
                 st.session_state['pxl_hali_boy'] = hali_boy
+                st.session_state.pop('heat_img', None)  # yeni piksel → eski haritayı temizle
 
         # === SONUÇLARI GÖSTER ===
         if 'pxl_result' in st.session_state:
@@ -595,3 +597,112 @@ elif stage == "2. Aşama: Pikselleştirme":
                     st.caption("Fiziksel oranlarıyla büyütülmüş önizleme")
 
             st.success(f"✅ {sv_tarak}T/{sv_atki}A makine — {sv_en}×{sv_boy}cm halı → {pw}×{ph} = {pw*ph:,} ilmek hazır!")
+
+            st.markdown("---")
+
+            # ═══════════════════════════════════════════════
+            # A: YAN YANA KARŞILAŞTIRMA
+            # ═══════════════════════════════════════════════
+            st.markdown("### 🔄 Yan Yana Karşılaştırma")
+            st.markdown("Orijinal kaynak ile pikselleştirilmiş sonucu aynı fiziksel boyuta getirerek karşılaştırır.")
+
+            # Her iki görseli aynı görsel boyuta getir (orijinalin boyutunda)
+            orig_bgr = st.session_state.get('pxl_source_img')
+            if orig_bgr is not None:
+                # Ortak hedef boyut: max 800px genişlik, orijinal orana göre yükseklik
+                comp_w = min(orig_bgr.shape[1], 800)
+                comp_h = int(comp_w * orig_bgr.shape[0] / orig_bgr.shape[1])
+
+                orig_resized = cv2.resize(orig_bgr, (comp_w, comp_h), interpolation=cv2.INTER_AREA)
+                pxl_resized  = cv2.resize(result_bgr, (comp_w, comp_h), interpolation=cv2.INTER_NEAREST)
+
+                cA, cB = st.columns(2)
+                with cA:
+                    st.markdown("**Orijinal Kaynak**")
+                    st.image(cv2.cvtColor(orig_resized, cv2.COLOR_BGR2RGB), use_container_width=True)
+                    st.caption(f"{orig_bgr.shape[1]}×{orig_bgr.shape[0]} px")
+                with cB:
+                    st.markdown("**Pikselleştirilmiş**")
+                    st.image(cv2.cvtColor(pxl_resized, cv2.COLOR_BGR2RGB), use_container_width=True)
+                    st.caption(f"{pw}×{ph} px  |  {unique_colors} renk")
+            else:
+                st.info("Karşılaştırma için kaynak görsel session'da bulunamadı. Sayfayı yeniden yükleyin.")
+
+            st.markdown("---")
+
+            # ═══════════════════════════════════════════════
+            # B: KABARTMA ISI HARİTASI
+            # ═══════════════════════════════════════════════
+            st.markdown("### 🌡️ Kabartma Isı Haritası")
+            st.markdown("Piksellerin parlaklık ve doygunluk yoğunluğuna göre halıdaki kabartma bölgelerini tahmin eder.")
+
+            blur_r = st.slider("Bulanıklık Yarıçapı", 1, 20, 6, key="heat_blur")
+
+            if st.button("🌡️ Haritayı Oluştur", key="btn_heat"):
+                with st.spinner("Isı haritası hesaplanıyor..."):
+                    heat_src = result_bgr.astype(np.float32)
+
+                    # Luminance ve saturation hesapla (HTML ile aynı formül)
+                    r = heat_src[:, :, 2] / 255.0
+                    g = heat_src[:, :, 1] / 255.0
+                    b = heat_src[:, :, 0] / 255.0
+
+                    lum = 0.299 * r + 0.587 * g + 0.114 * b
+                    mx  = np.maximum(np.maximum(r, g), b)
+                    mn  = np.minimum(np.minimum(r, g), b)
+                    sat = np.where(mx == 0, 0.0, (mx - mn) / mx)
+
+                    intensity = (1.0 - lum) * 0.55 + sat * 0.45
+
+                    # Box blur (HTML'deki boxBlur ile aynı)
+                    ksize = blur_r * 2 + 1
+                    blurred = cv2.blur(intensity, (ksize, ksize))
+
+                    # Normalize [0, 1]
+                    lo, hi = blurred.min(), blurred.max()
+                    t = (blurred - lo) / (hi - lo + 1e-9)
+
+                    # Renk skalası (HTML heatColor ile aynı)
+                    # stops: koyu mavi → yeşil → turuncu → kırmızı → beyaz
+                    stops = np.array([
+                        [4,  44,  83],
+                        [29, 158, 117],
+                        [239, 159, 39],
+                        [226, 75,  74],
+                        [255, 255, 255]
+                    ], dtype=np.float32)
+
+                    n = len(stops) - 1
+                    idx = np.clip((t * n).astype(int), 0, n - 1)
+                    frac = t * n - idx
+                    frac = np.clip(frac, 0, 1)[:, :, np.newaxis]
+
+                    c_lo = stops[idx]
+                    c_hi = stops[np.clip(idx + 1, 0, n)]
+                    heat_rgb = (c_lo + (c_hi - c_lo) * frac).astype(np.uint8)
+
+                    st.session_state['heat_img'] = heat_rgb
+
+            if 'heat_img' in st.session_state:
+                heat_img = st.session_state['heat_img']
+                st.image(heat_img, caption="Isı haritası — Koyu mavi: düşük kabartma → Beyaz: yüksek kabartma", use_container_width=True)
+
+                # Renk skalası göster
+                gradient_html = """
+                <div style="display:flex;align-items:center;gap:10px;margin:8px 0;">
+                  <span style="font-size:12px;color:#8E8E93;">Düşük kabartma</span>
+                  <div style="flex:1;height:14px;border-radius:6px;background:linear-gradient(to right,#042C53,#1D9E75,#EF9F27,#E24B4A,#ffffff);border:1px solid rgba(0,0,0,0.1);"></div>
+                  <span style="font-size:12px;color:#8E8E93;">Yüksek kabartma</span>
+                </div>
+                """
+                st.markdown(gradient_html, unsafe_allow_html=True)
+
+                # İndir
+                ok_h, buf_h = cv2.imencode(".png", cv2.cvtColor(heat_img, cv2.COLOR_RGB2BGR))
+                if ok_h:
+                    st.download_button(
+                        "📥 Isı Haritasını İndir (PNG)",
+                        data=io.BytesIO(buf_h),
+                        file_name=f"ISI_HARITASI_{pw}x{ph}.png",
+                        mime="image/png", key="dl_heat"
+                    )
